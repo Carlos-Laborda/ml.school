@@ -146,8 +146,9 @@ class Endpoint(FlowSpec, FlowMixin):
 
                 while self.dispatched_samples < self.samples:
                     payload = {}
-
-                    batch = self.data.sample(n=10)
+                    
+                    batch_size = min(10, self.samples - self.dispatched_samples)
+                    batch = self.data.sample(n=batch_size)
                     payload["inputs"] = [
                         {
                             k: (None if pd.isna(v) else v)

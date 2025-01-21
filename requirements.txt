@@ -13,6 +13,7 @@ setuptools
 evidently
 keras
 scikit-learn
+seaborn
 pandas
 numpy
 jax[cpu]

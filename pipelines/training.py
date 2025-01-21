@@ -1,6 +1,9 @@
 import logging
 import os
+import matplotlib.pyplot as plt
 from pathlib import Path
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, precision_score, recall_score
 
 from common import (
     PYTHON,
@@ -43,6 +46,7 @@ configure_logging()
         "mlflow",
         "setuptools",
         "python-dotenv",
+        "seaborn",
     ),
 )
 class Training(FlowSpec, FlowMixin):
@@ -232,14 +236,14 @@ class Training(FlowSpec, FlowMixin):
     @step
     def evaluate_fold(self):
         """Evaluate the model we created as part of the cross-validation process.
-
+    
         This step will run for each fold in the cross-validation process. It evaluates
         the model using the test data for this fold.
         """
         import mlflow
-
+    
         logging.info("Evaluating fold %d...", self.fold)
-
+    
         # Let's evaluate the model using the test data we processed and stored as
         # artifacts during the `transform` step.
         self.loss, self.accuracy = self.model.evaluate(
@@ -247,7 +251,7 @@ class Training(FlowSpec, FlowMixin):
             self.y_test,
             verbose=2,
         )
-
+    
         logging.info(
             "Fold %d - loss: %f - accuracy: %f",
             self.fold,
@@ -255,6 +259,22 @@ class Training(FlowSpec, FlowMixin):
             self.accuracy,
         )
 
+        # Generate predictions for the test set
+        y_pred = self.model.predict(self.x_test)
+        y_pred_classes = y_pred.argmax(axis=1)
+        y_true = self.y_test.argmax(axis=1)
+
+        # Compute precision and recall
+        self.precision = precision_score(y_true, y_pred_classes, average='weighted')
+        self.recall = recall_score(y_true, y_pred_classes, average='weighted')
+
+        logging.info(
+            "Fold %d - precision: %f - recall: %f",
+            self.fold,
+            self.precision,
+            self.recall,
+        )
+        
         # Let's log everything under the same nested run we created when training the
         # current fold's model.
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
@@ -263,14 +283,16 @@ class Training(FlowSpec, FlowMixin):
                 {
                     "test_loss": self.loss,
                     "test_accuracy": self.accuracy,
+                    "test_precision": self.precision,
+                    "test_recall": self.recall,
                 },
             )
-
+    
         # When we finish evaluating every fold in the cross-validation process, we want
         # to evaluate the overall performance of the model by averaging the scores from
         # each fold.
         self.next(self.evaluate_model)
-
+        
     @card
     @step
     def evaluate_model(self, inputs):
@@ -291,12 +313,14 @@ class Training(FlowSpec, FlowMixin):
         # Let's calculate the mean and standard deviation of the accuracy and loss from
         # all the cross-validation folds. Notice how we are accumulating these values
         # using the `inputs` parameter provided by Metaflow.
-        metrics = [[i.accuracy, i.loss] for i in inputs]
-        self.accuracy, self.loss = np.mean(metrics, axis=0)
-        self.accuracy_std, self.loss_std = np.std(metrics, axis=0)
+        metrics = [[i.accuracy, i.loss, i.precision, i.recall] for i in inputs]
+        self.accuracy, self.loss, self.precision, self.recall = np.mean(metrics, axis=0)
+        self.accuracy_std, self.loss_std, self.precision_std, self.recall_std = np.std(metrics, axis=0)
 
         logging.info("Accuracy: %f ±%f", self.accuracy, self.accuracy_std)
         logging.info("Loss: %f ±%f", self.loss, self.loss_std)
+        logging.info("Precision: %f ±%f", self.precision, self.precision_std)
+        logging.info("Recall: %f ±%f", self.recall, self.recall_std)
 
         # Let's log the model metrics on the parent run.
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
@@ -307,6 +331,10 @@ class Training(FlowSpec, FlowMixin):
                     "cross_validation_accuracy_std": self.accuracy_std,
                     "cross_validation_loss": self.loss,
                     "cross_validation_loss_std": self.loss_std,
+                    "cross_validation_precision": self.precision,
+                    "cross_validation_precision_std": self.precision_std,
+                    "cross_validation_recall": self.recall,
+                    "cross_validation_recall_std": self.recall_std
                 },
             )
 
